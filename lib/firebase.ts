@@ -73,10 +73,17 @@ const requestPushNotificationToken = async (): Promise<string | null> => {
   const permission = await Notification.requestPermission();
   if (permission !== "granted") return null;
 
-  const registration = await navigator.serviceWorker.register(
-    "/firebase-messaging-sw.js",
-    { type: "module" }
-  );
+  let registration: ServiceWorkerRegistration;
+  try {
+    // Important : ne pas utiliser "type: module" ici pour rester compatible avec
+    // le service worker basé sur importScripts, notamment sur iOS PWA.
+    registration = await navigator.serviceWorker.register(
+      "/firebase-messaging-sw.js"
+    );
+  } catch (error) {
+    console.error("Erreur lors de l'enregistrement du service worker FCM", error);
+    return null;
+  }
 
   const messagingInstance = getMessagingInstance();
   if (!messagingInstance) return null;
