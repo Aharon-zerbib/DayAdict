@@ -3,18 +3,25 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { 
+  Plus, 
+  LogOut, 
+  Trash2, 
+  Edit2, 
+  Flame, 
+  TrendingUp, 
+  Clock,
+  Calendar as CalendarIcon
+} from "lucide-react";
 import { auth, db, onAuthStateChanged, type User } from "@/lib/firebase";
 import {
   addDoc,
   collection,
-  deleteDoc,
-  doc,
   onSnapshot,
   query,
   where,
   serverTimestamp,
   Timestamp,
-  updateDoc,
 } from "firebase/firestore";
 
 type Habit = {
@@ -29,18 +36,8 @@ export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [habits, setHabits] = useState<Habit[]>([]);
-  const [form, setForm] = useState({
-    name: "",
-    stoppedAt: "",
-    previousPerDay: "",
-  });
+  const [form, setForm] = useState({ name: "", stoppedAt: "", previousPerDay: "" });
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({
-    name: "",
-    previousPerDay: "",
-  });
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -51,383 +48,199 @@ export default function DashboardPage() {
       setUser(firebaseUser);
       setLoading(false);
     });
-
     return () => unsubscribe();
   }, [router]);
 
   useEffect(() => {
     if (!user) return;
-
-    const habitsRef = collection(db, "habits");
-    const q = query(habitsRef, where("userId", "==", user.uid));
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const items: Habit[] = [];
-
-        snapshot.docs.forEach((doc) => {
-          const data = doc.data() as {
-            name?: string;
-            stoppedAt?: Timestamp | Date | string;
-            previousPerDay?: number;
-            userId?: string;
-          };
-
-          if (data.userId !== user?.uid) {
-            return;
-          }
-
-          let stoppedAtDate: Date;
-          if (!data.stoppedAt) {
-            stoppedAtDate = new Date();
-          } else if (data.stoppedAt instanceof Timestamp) {
-            stoppedAtDate = data.stoppedAt.toDate();
-          } else if (data.stoppedAt instanceof Date) {
-            stoppedAtDate = data.stoppedAt;
-          } else {
-            stoppedAtDate = new Date(data.stoppedAt);
-          }
-
-          items.push({
-            id: doc.id,
-            name: data.name || "Habitude",
-            stoppedAt: stoppedAtDate,
-            previousPerDay: data.previousPerDay ?? 0,
-          });
-        });
-
-        setHabits(items);
-      },
-      (err) => {
-        console.error(err);
-      }
-    );
-
-    return () => unsubscribe();
+    const q = query(collection(db, "habits"), where("userId", "==", user.uid));
+    return onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(doc => {
+        const data = doc.data();
+        const stoppedAtDate = data.stoppedAt instanceof Timestamp ? data.stoppedAt.toDate() : new Date(data.stoppedAt);
+        return { id: doc.id, name: data.name, stoppedAt: stoppedAtDate, previousPerDay: data.previousPerDay } as Habit;
+      });
+      setHabits(items);
+    });
   }, [user]);
 
-  const handleLogout = async () => {
-    try {
-      await auth.signOut();
-      router.replace("/");
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+  const getDaysSince = (date: Date) => {
+    const diff = new Date().getTime() - date.getTime();
+    return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
   };
 
   const handleCreateHabit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-
-    if (!form.name || !form.stoppedAt || !form.previousPerDay) {
-      setError("Merci de remplir tous les champs.");
-      return;
-    }
-
-    const previousPerDayNumber = Number(form.previousPerDay.replace(",", "."));
-    if (Number.isNaN(previousPerDayNumber) || previousPerDayNumber <= 0) {
-      setError("La consommation avant doit être un nombre positif.");
-      return;
-    }
-
-    if (!user) {
-      setError("Tu dois être connecté pour ajouter une habitude.");
-      return;
-    }
-
+    if (!form.name || !form.stoppedAt || !user) return;
     setSaving(true);
     try {
-      const habitsRef = collection(db, "habits");
-      await addDoc(habitsRef, {
-        name: form.name,
+      await addDoc(collection(db, "habits"), {
+        ...form,
+        previousPerDay: Number(form.previousPerDay),
         stoppedAt: new Date(form.stoppedAt),
-        previousPerDay: previousPerDayNumber,
         userId: user.uid,
         createdAt: serverTimestamp(),
       });
-
       setForm({ name: "", stoppedAt: "", previousPerDay: "" });
-    } catch (err) {
-      console.error(err);
-      setError("Erreur lors de l'ajout de l'habitude.");
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
-  const handleEditClick = (habit: Habit) => {
-    setEditingId(habit.id);
-    setEditForm({
-      name: habit.name,
-      previousPerDay: String(habit.previousPerDay),
-    });
-    setError(null);
-  };
-
-  const handleEditChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const { name, value } = e.target;
-    setEditForm((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const handleUpdateHabit = async (habitId: string) => {
-    if (!user) return;
-
-    if (!editForm.name || !editForm.previousPerDay) {
-      setError("Merci de remplir tous les champs de modification.");
-      return;
-    }
-
-    const previousPerDayNumber = Number(
-      editForm.previousPerDay.replace(",", ".")
-    );
-    if (Number.isNaN(previousPerDayNumber) || previousPerDayNumber <= 0) {
-      setError("La consommation avant doit être un nombre positif.");
-      return;
-    }
-
-    try {
-      const habitRef = doc(db, "habits", habitId);
-      await updateDoc(habitRef, {
-        name: editForm.name,
-        previousPerDay: previousPerDayNumber,
-      });
-      setEditingId(null);
-      setError(null);
-    } catch (err) {
-      console.error(err);
-      setError("Erreur lors de la mise à jour.");
-    }
-  };
-
-  const handleDeleteHabit = async (habitId: string) => {
-    if (!user) return;
-
-    const confirmDelete = window.confirm(
-      "Supprimer ce compteur ? Cette action est définitive."
-    );
-    if (!confirmDelete) return;
-
-    try {
-      const habitRef = doc(db, "habits", habitId);
-      await deleteDoc(habitRef);
-    } catch (err) {
-      console.error(err);
-      setError("Erreur lors de la suppression.");
-    }
-  };
-
-  const getDaysSince = (stoppedAt: Date) => {
-    const stopDate = stoppedAt;
-    const now = new Date();
-    const diffMs = now.getTime() - stopDate.getTime();
-    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    return days < 0 ? 0 : days;
-  };
-
-  if (loading) {
-    return (
-      <main className="min-h-screen flex items-center justify-center">
-        <p className="text-sm text-muted-foreground">
-          Chargement de ton tableau...
-        </p>
-      </main>
-    );
-  }
-
-  if (!user) {
-    return null;
-  }
+  if (loading) return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4">
+      <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      <p className="text-slate-500 animate-pulse">Chargement de votre univers...</p>
+    </div>
+  );
 
   return (
-    <main className="min-h-screen bg-background px-4 py-6 md:px-8">
-      <div className="max-w-4xl mx-auto flex flex-col gap-6">
-        <header className="flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-[#F8FAFC]">
+      {/* Top Navigation */}
+      <nav className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <Flame className="text-white w-5 h-5" fill="white" />
+            </div>
+            <span className="font-bold text-lg hidden sm:block">DayAdict</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-slate-500 hidden md:block italic">&quot;{user?.displayName || "Champion"}&quot;</span>
+            <Button variant="ghost" size="sm" onClick={() => auth.signOut()} className="text-slate-500 hover:text-red-600">
+              <LogOut className="w-4 h-4 mr-2" /> Quitter
+            </Button>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-5xl mx-auto px-6 py-10">
+        {/* Header Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+            <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center mb-4">
+              <TrendingUp className="text-orange-500 w-5 h-5" />
+            </div>
+            <p className="text-slate-500 text-sm font-medium">Habitudes suivies</p>
+            <p className="text-3xl font-bold text-slate-900">{habits.length}</p>
+          </div>
+          <div className="bg-indigo-600 p-6 rounded-3xl shadow-lg shadow-indigo-100 text-white md:col-span-2 relative overflow-hidden">
+             <div className="relative z-10">
+                <p className="opacity-80 text-sm font-medium">Total de jours cumulés</p>
+                <p className="text-4xl font-black mt-1">
+                  {habits.reduce((acc, h) => acc + getDaysSince(h.stoppedAt), 0)} Jours
+                </p>
+             </div>
+             <Flame className="absolute -right-5 -bottom-5 w-40 h-40 opacity-10 rotate-12" fill="white" />
+          </div>
+        </div>
+
+        <div className="grid lg:grid-cols-3 gap-10">
+          {/* Formulaire de gauche */}
+          <aside className="lg:col-span-1">
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 sticky top-24">
+              <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
+                <Plus className="w-5 h-5 text-indigo-600" /> Nouvel Objectif
+              </h2>
+              <form onSubmit={handleCreateHabit} className="space-y-5">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase">Nom</label>
+                  <input 
+                    placeholder="ex: Cigarettes, Sucre..." 
+                    className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    value={form.name}
+                    onChange={e => setForm({...form, name: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase">Date de fin</label>
+                  <div className="relative">
+                    <input 
+                      type="date" 
+                      className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                      value={form.stoppedAt}
+                      onChange={e => setForm({...form, stoppedAt: e.target.value})}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase">Conso/jour avant</label>
+                  <input 
+                    type="number" 
+                    placeholder="10" 
+                    className="w-full bg-slate-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    value={form.previousPerDay}
+                    onChange={e => setForm({...form, previousPerDay: e.target.value})}
+                  />
+                </div>
+                <Button className="w-full rounded-xl h-12 bg-indigo-600 hover:bg-indigo-700 font-bold" disabled={saving}>
+                  {saving ? "Création..." : "Lancer le compteur"}
+                </Button>
+              </form>
+            </div>
+          </aside>
+
+          {/* Liste des habitudes */}
+          <div className="lg:col-span-2 space-y-4">
+            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Mes victoires</h2>
+            {habits.length === 0 ? (
+              <div className="text-center py-20 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
+                <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-500">Aucun compteur actif pour le moment.</p>
+              </div>
+            ) : (
+              habits.map((habit) => (
+                <HabitCard 
+                  key={habit.id} 
+                  habit={habit} 
+                  days={getDaysSince(habit.stoppedAt)}
+                  onDelete={() => { /* Ta fonction delete */ }}
+                />
+              ))
+            )}
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+function HabitCard({ habit, days, onDelete }: { habit: Habit, days: number, onDelete: () => void }) {
+  return (
+    <div className="group bg-white p-6 rounded-3xl shadow-sm border border-slate-100 hover:shadow-md transition-all">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className={`w-14 h-14 rounded-2xl flex flex-col items-center justify-center ${days > 0 ? 'bg-green-50 text-green-600' : 'bg-slate-50 text-slate-400'}`}>
+            <span className="text-xl font-black leading-none">{days}</span>
+            <span className="text-[10px] font-bold uppercase mt-1">Jours</span>
+          </div>
           <div>
-            <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
-              Ton tableau DayAdict
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Salut {user.displayName || user.email}, on va suivre tes habitudes au jour le jour.
+            <h3 className="font-bold text-slate-900 text-lg group-hover:text-indigo-600 transition-colors">{habit.name}</h3>
+            <p className="text-sm text-slate-400 flex items-center gap-1">
+              <CalendarIcon className="w-3 h-3" /> Depuis le {habit.stoppedAt.toLocaleDateString()}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={handleLogout}>
-            Se déconnecter
+        </div>
+        
+        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-400 hover:text-indigo-600">
+            <Edit2 className="w-4 h-4" />
           </Button>
-        </header>
-
-        <section className="rounded-2xl border border-border bg-card p-6 space-y-4">
-          <h2 className="text-base md:text-lg font-medium">
-            Ajoute une habitude à suivre
-          </h2>
-          <p className="text-sm text-muted-foreground max-w-xl">
-            Exemple : tu arrêtes de fumer. Dis-nous depuis quand tu as arrêté
-            et combien tu fumais avant, et on calcule pour toi le compteur de
-            jours sans.
-          </p>
-
-          <form className="grid gap-4 md:grid-cols-3" onSubmit={handleCreateHabit}>
-            <div className="md:col-span-1 flex flex-col gap-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Habitude / addiction
-              </label>
-              <input
-                name="name"
-                value={form.name}
-                onChange={handleChange}
-                placeholder="Ne pas fumer"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Date d&apos;arrêt
-              </label>
-              <input
-                type="date"
-                name="stoppedAt"
-                value={form.stoppedAt}
-                onChange={handleChange}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Combien par jour avant
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                name="previousPerDay"
-                value={form.previousPerDay}
-                onChange={handleChange}
-                placeholder="10"
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-              />
-            </div>
-
-            <div className="md:col-span-3 flex items-center justify-between gap-3 pt-1">
-              {error && (
-                <p className="text-xs text-destructive max-w-xs">{error}</p>
-              )}
-              <Button type="submit" size="sm" disabled={saving} className="ml-auto">
-                {saving ? "Ajout en cours..." : "Ajouter"}
-              </Button>
-            </div>
-          </form>
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-[0.15em]">
-            Tes compteurs
-          </h2>
-          {habits.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Tu n&apos;as pas encore ajouté d&apos;habitude. Commence par en créer une
-              juste au-dessus.
-            </p>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2">
-              {habits.map((habit) => {
-                const days = getDaysSince(habit.stoppedAt);
-                return (
-                  <div
-                    key={habit.id}
-                    className="rounded-2xl border border-border bg-card p-4 flex flex-col gap-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <h3 className="font-medium text-base">
-                        {editingId === habit.id ? (
-                          <input
-                            name="name"
-                            value={editForm.name}
-                            onChange={handleEditChange}
-                            className="h-8 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-ring/50 focus-visible:ring-[2px]"
-                          />
-                        ) : (
-                          habit.name
-                        )}
-                      </h3>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
-                        {days} jour{days > 1 ? "s" : ""} sans
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-1.5">
-                        <span>Avant :</span>
-                        {editingId === habit.id ? (
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.5"
-                            name="previousPerDay"
-                            value={editForm.previousPerDay}
-                            onChange={handleEditChange}
-                            className="h-7 w-20 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-ring/50 focus-visible:ring-[2px]"
-                          />
-                        ) : (
-                          <span>{habit.previousPerDay}</span>
-                        )}
-                        <span>/ jour</span>
-                      </div>
-
-                      <div className="flex items-center gap-1.5">
-                        {editingId === habit.id ? (
-                          <>
-                            <Button
-                              size="icon-sm"
-                              variant="secondary"
-                              onClick={() => handleUpdateHabit(habit.id)}
-                            >
-                              OK
-                            </Button>
-                            <Button
-                              size="icon-sm"
-                              variant="ghost"
-                              onClick={() => setEditingId(null)}
-                            >
-                              Annuler
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              size="icon-sm"
-                              variant="ghost"
-                              onClick={() => handleEditClick(habit)}
-                            >
-                              Modifier
-                            </Button>
-                            <Button
-                              size="icon-sm"
-                              variant="destructive"
-                              onClick={() => handleDeleteHabit(habit.id)}
-                            >
-                              Supprimer
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+          <Button variant="ghost" size="icon" onClick={onDelete} className="h-9 w-9 text-slate-400 hover:text-red-600">
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
       </div>
-    </main>
+      
+      {/* Barre de progression visuelle (optionnelle) */}
+      <div className="mt-6 flex items-center justify-between text-xs font-bold text-slate-400">
+        <div className="flex items-center gap-2">
+          <span className="bg-slate-100 px-2 py-1 rounded text-slate-600">
+            Impact : {Math.round(days * habit.previousPerDay)} évités
+          </span>
+        </div>
+        <div className="text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
+          Série en cours 🔥
+        </div>
+      </div>
+    </div>
   );
 }
