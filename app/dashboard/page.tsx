@@ -236,6 +236,28 @@ export default function DashboardPage() {
     }
   };
 
+  const handleTestNotification = async () => {
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) return;
+
+    if (Notification.permission !== "granted") {
+      await Notification.requestPermission();
+    }
+
+    if (Notification.permission !== "granted") return;
+
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      registration.showNotification("Test DayAdict ✅", {
+        body: "Si tu vois cette notification, tout est bien configuré.",
+        icon: "/icons/icon-192x192.png",
+        badge: "/icons/icon-72x72.png",
+      });
+    } catch {
+      // ignore
+    }
+  };
+
   const handleCreateHabit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.stoppedAt || !user) return;
@@ -417,7 +439,7 @@ export default function DashboardPage() {
                   />
                 </div>
 
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                   <Button
                     type="button"
                     variant="outline"
@@ -433,6 +455,14 @@ export default function DashboardPage() {
                     onClick={handleToggleDailyReminder}
                   >
                     {dailyReminderEnabled ? "Rappel activé" : "Activer le rappel"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl"
+                    onClick={handleTestNotification}
+                  >
+                    Tester la notification
                   </Button>
                 </div>
 
